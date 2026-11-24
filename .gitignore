@@ -1,0 +1,64 @@
+# Compiled binaries & executables
+*.exe
+*.dll
+*.sys
+
+# Compiler object files & build artifacts
+*.obj
+*.o
+*.res
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.idb
+*.tlog
+*.old
+
+# Build & output directories
+build/
+**/build/
+dist/
+**/dist/
+release/
+**/release/
+x64/
+**/x64/
+Debug/
+**/Debug/
+Release/
+**/Release/
+
+# IDE & Editor files
+.vs/
+**/.vs/
+.vscode/
+**/.vscode/
+*.user
+*.suo
+*.VC.db
+*.opendb
+
+# Python & virtual environments
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Temporary, cache & log files
+*.tmp
+*.log
+*.bak
+*.swp
+
+# OS-generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store

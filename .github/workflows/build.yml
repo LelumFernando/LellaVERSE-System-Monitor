@@ -1,0 +1,48 @@
+name: Build & Package Universal Release
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Standalone Binary & Windows Setup
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Setup Inno Setup
+        uses: BrahimBou/setup-inno-setup@v1.1.0
+
+      - name: Compile Standalone Native Executable
+        run: |
+          mkdir build -ErrorAction SilentlyContinue
+          mkdir release -ErrorAction SilentlyContinue
+          rc.exe /nologo /fo build\app.res resources\app.rc
+          cl.exe /nologo /std:c++17 /utf-8 /O2 /Oi /Ot /GL /GS- /Gy /DNDEBUG /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /EHsc /MT /Iinclude /W3 /c /Fobuild\ src\main.cpp src\overlay.cpp src\renderer.cpp src\monitor_manager.cpp src\telemetry_manager.cpp src\network_monitor.cpp src\cpu_monitor.cpp src\gpu_monitor.cpp src\memory_monitor.cpp src\power_monitor.cpp src\fps_monitor.cpp src\hardware_sensor_driver.cpp src\settings.cpp
+          link.exe /NOLOGO /SUBSYSTEM:WINDOWS /LTCG /OPT:REF /OPT:ICF /MACHINE:X64 /OUT:release\LellaVERSE_System_Monitor.exe build\*.obj build\app.res gdiplus.lib iphlpapi.lib ws2_32.lib pdh.lib powrprof.lib dxgi.lib d3d11.lib dwmapi.lib shell32.lib ole32.lib advapi32.lib user32.lib gdi32.lib comctl32.lib kernel32.lib setupapi.lib
+        shell: powershell
+
+      - name: Compile Inno Setup Installer
+        run: |
+          ISCC.exe installer\setup.iss
+        shell: powershell
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: LellaVERSE_System_Monitor_Universal_Release
+          path: |
+            release/LellaVERSE_System_Monitor.exe
+            release/LellaVERSE_System_Monitor_Setup.exe
