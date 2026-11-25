@@ -145,6 +145,8 @@ struct GpuInfo {
     double    powerW            = -1.0;
     double    vramUsedMB        = 0.0;
     double    vramTotalMB       = 0.0;
+    double    sharedUsedMB      = 0.0;
+    double    sharedTotalMB     = 0.0;
     bool      isAvailable       = false;
     bool      isDiscrete        = false;
     bool      showUsage         = true;
@@ -209,6 +211,7 @@ struct AppSettings {
     int      width           = DEFAULT_WIDTH;
     int      height          = DEFAULT_HEIGHT;
     int      monitorIndex    = -1; // -1 = secondary or fallback
+    bool     hasSavedSize    = false; // runtime flag: true if size was loaded from INI
     int      refreshMs       = 1000;
     int      opacityPct      = 88;
     bool     locked          = false;

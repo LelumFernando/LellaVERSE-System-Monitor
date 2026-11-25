@@ -711,52 +711,75 @@ void GpuMonitor::Collect(std::vector<GpuInfo>& outGpus) {
         info.showUsage = Settings::Get().IsGpuUsageVisible((int)i);
         info.showVram  = Settings::Get().IsGpuVramVisible((int)i);
 
-        // --- Memory Telemetry (iGPU vs dGPU) ---
-        double vramUsedMB = 0.0;
-        double vramTotalMB = 0.0;
+        // --- Real-Time System-Wide Memory Telemetry (VRAM + Shared RAM) ---
+        double dedUsedMB     = 0.0;
+        double dedTotalMB    = (double)ad.dedicatedVram / (1024.0 * 1024.0);
+        double sharedUsedMB  = 0.0;
+        double sharedTotalMB = (double)ad.sharedSystemMemory / (1024.0 * 1024.0);
 
-        if (ad.pAdapter) {
+        auto sumPdhMem = [&](PDH_FMT_COUNTERVALUE_ITEM_W* items, DWORD count) -> double {
+            double sum = 0.0;
+            if (!items || count == 0) return 0.0;
+            for (DWORD j = 0; j < count; ++j) {
+                if (items[j].FmtValue.CStatus != PDH_CSTATUS_VALID_DATA &&
+                    items[j].FmtValue.CStatus != PDH_CSTATUS_NEW_DATA) continue;
+                if (!items[j].szName) continue;
+                for (const auto& luidPattern : ad.luidPatterns) {
+                    if (ContainsSubstringI(items[j].szName, luidPattern.c_str())) {
+                        if (items[j].FmtValue.largeValue > 0) {
+                            sum += (double)items[j].FmtValue.largeValue / (1024.0 * 1024.0);
+                        }
+                        break;
+                    }
+                }
+            }
+            return sum;
+        };
+
+        // 1. Primary: PDH GPU Adapter Memory (system-wide real-time Dedicated + Shared usage)
+        dedUsedMB    = sumPdhMem(dedMemItems, dedMemItemCount);
+        sharedUsedMB = sumPdhMem(sharedMemItems, sharedMemItemCount);
+
+        // 2. NVIDIA NVML system-wide Dedicated VRAM fallback/refinement
+        if (ad.vendor == GPU_VENDOR_NVIDIA && ad.hasNvml && ad.nvmlDevice && pfn_nvmlDeviceGetMemoryInfo) {
+            nvmlMemory_t nvMem = {};
+            if (pfn_nvmlDeviceGetMemoryInfo(ad.nvmlDevice, &nvMem) == 0 && nvMem.total > 0) {
+                if (dedUsedMB <= 0.0) {
+                    dedUsedMB = (double)nvMem.used / (1024.0 * 1024.0);
+                }
+                if (dedTotalMB <= 0.0) {
+                    dedTotalMB = (double)nvMem.total / (1024.0 * 1024.0);
+                }
+            }
+        }
+
+        // 3. DXGI QueryVideoMemoryInfo last-resort fallback (per-process if PDH unavailable)
+        if (ad.pAdapter && (dedUsedMB <= 0.0 || sharedUsedMB <= 0.0)) {
             IDXGIAdapter3* pAdapter3 = nullptr;
             if (SUCCEEDED(ad.pAdapter->QueryInterface(__uuidof(IDXGIAdapter3), (void**)&pAdapter3))) {
                 DXGI_QUERY_VIDEO_MEMORY_INFO memInfo = {};
-                DXGI_MEMORY_SEGMENT_GROUP segGroup = ad.isDiscrete ? DXGI_MEMORY_SEGMENT_GROUP_LOCAL : DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL;
-                if (SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, segGroup, &memInfo))) {
-                    vramUsedMB  = (double)memInfo.CurrentUsage / (1024.0 * 1024.0);
-                    vramTotalMB = (double)memInfo.Budget / (1024.0 * 1024.0);
+                if (dedUsedMB <= 0.0 && SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memInfo))) {
+                    dedUsedMB = (double)memInfo.CurrentUsage / (1024.0 * 1024.0);
+                    if (dedTotalMB <= 0.0) dedTotalMB = (double)memInfo.Budget / (1024.0 * 1024.0);
+                }
+                if (sharedUsedMB <= 0.0 && SUCCEEDED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &memInfo))) {
+                    sharedUsedMB = (double)memInfo.CurrentUsage / (1024.0 * 1024.0);
+                    if (sharedTotalMB <= 0.0) sharedTotalMB = (double)memInfo.Budget / (1024.0 * 1024.0);
                 }
                 pAdapter3->Release();
             }
         }
 
-        // PDH Memory Fallback
-        if (vramUsedMB <= 0.0) {
-            auto* targetItems = ad.isDiscrete ? dedMemItems : sharedMemItems;
-            DWORD targetCount = ad.isDiscrete ? dedMemItemCount : sharedMemItemCount;
-
-            if (targetItems && targetCount > 0) {
-                double pdhMemSum = 0.0;
-                for (DWORD j = 0; j < targetCount; ++j) {
-                    if (!targetItems[j].szName) continue;
-                    for (const auto& luidPattern : ad.luidPatterns) {
-                        if (ContainsSubstringI(targetItems[j].szName, luidPattern.c_str())) {
-                            pdhMemSum += (double)targetItems[j].FmtValue.largeValue / (1024.0 * 1024.0);
-                            break;
-                        }
-                    }
-                }
-                if (pdhMemSum > 0.0) {
-                    vramUsedMB = pdhMemSum;
-                }
-            }
+        if (ad.isDiscrete) {
+            info.vramUsedMB  = dedUsedMB;
+            info.vramTotalMB = dedTotalMB;
+        } else {
+            // Integrated GPU uses Shared System RAM (plus small dedicated carveout if present)
+            info.vramUsedMB  = sharedUsedMB + dedUsedMB;
+            info.vramTotalMB = (sharedTotalMB > 0.0) ? (sharedTotalMB + dedTotalMB) : dedTotalMB;
         }
-
-        if (vramTotalMB <= 0.0) {
-            SIZE_T totalBytes = ad.isDiscrete ? ad.dedicatedVram : ad.sharedSystemMemory;
-            vramTotalMB = (double)totalBytes / (1024.0 * 1024.0);
-        }
-
-        info.vramUsedMB = vramUsedMB;
-        info.vramTotalMB = vramTotalMB;
+        info.sharedUsedMB  = sharedUsedMB;
+        info.sharedTotalMB = sharedTotalMB;
 
         // --- Core Clock, Temperature & Board Power Resolution ---
         double clockMHz = 0.0;

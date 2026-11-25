@@ -22,8 +22,11 @@ void Settings::Load() {
 
     m_data.posX         = (int)GetPrivateProfileIntW(L"Window", L"PosX", -1, path.c_str());
     m_data.posY         = (int)GetPrivateProfileIntW(L"Window", L"PosY", -1, path.c_str());
-    m_data.width        = (int)GetPrivateProfileIntW(L"Window", L"Width", DEFAULT_WIDTH, path.c_str());
-    m_data.height       = (int)GetPrivateProfileIntW(L"Window", L"Height", DEFAULT_HEIGHT, path.c_str());
+    int savedW          = (int)GetPrivateProfileIntW(L"Window", L"Width", -1, path.c_str());
+    int savedH          = (int)GetPrivateProfileIntW(L"Window", L"Height", -1, path.c_str());
+    m_data.hasSavedSize = (savedW >= MIN_WIDTH && savedH >= MIN_HEIGHT);
+    m_data.width        = (savedW > 0) ? savedW : DEFAULT_WIDTH;
+    m_data.height       = (savedH > 0) ? savedH : DEFAULT_HEIGHT;
     m_data.monitorIndex = (int)GetPrivateProfileIntW(L"Window", L"MonitorIndex", -1, path.c_str());
     m_data.refreshMs    = (int)GetPrivateProfileIntW(L"Window", L"RefreshMs", 1000, path.c_str());
     m_data.opacityPct   = (int)GetPrivateProfileIntW(L"Window", L"OpacityPct", 88, path.c_str());

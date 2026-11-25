@@ -477,6 +477,13 @@ void Renderer::RenderStandard(Gdiplus::Graphics& g, const TelemetrySnapshot& sna
 
             g.DrawString(vramStr, -1, &fontDetail, Gdiplus::RectF(padX, curY + 6.0f, availW - 8.0f, 16.0f), &sfRight, &brushWhite);
 
+            if (blockH >= 38.0f && gpu.sharedTotalMB > 0.0) {
+                wchar_t sharedStr[64];
+                swprintf_s(sharedStr, L"Shared: %.1f / %.1f GB",
+                    gpu.sharedUsedMB / 1024.0, gpu.sharedTotalMB / 1024.0);
+                g.DrawString(sharedStr, -1, &fontDetail, Gdiplus::PointF(padX + 24.0f, curY + 21.0f), &brushDim);
+            }
+
             if (blockH >= 38.0f) {
                 DrawProgressBar(g, padX + 8.0f, curY + blockH - 9.0f, availW - 16.0f, 4.0f, (float)pct, pal.vramAccent, pal.barBackground);
             }

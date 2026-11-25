@@ -97,14 +97,18 @@ bool Overlay::Init(HINSTANCE hInstance) {
 
     SetTimer(m_hWnd, TIMER_TELEMETRY, m_settings.refreshMs, NULL);
 
-    // Initial render with dynamic optimal height adjustment
+    // Initial render: only auto-fit height on first run (when no saved size exists)
     TelemetrySnapshot initialSnap = TelemetryManager::Get().GetSnapshot();
-    int optimalH = m_renderer.CalculateOptimalHeight(initialSnap, m_settings);
-    if (optimalH >= MIN_HEIGHT && optimalH != m_settings.height) {
-        m_settings.height = optimalH;
-        Settings::Get().Data().height = optimalH;
-        SetWindowPos(m_hWnd, NULL, 0, 0, m_settings.width, optimalH, SWP_NOMOVE | SWP_NOZORDER);
-        m_renderer.Resize(m_settings.width, optimalH);
+    if (!m_settings.hasSavedSize) {
+        int optimalH = m_renderer.CalculateOptimalHeight(initialSnap, m_settings);
+        if (optimalH >= MIN_HEIGHT && optimalH != m_settings.height) {
+            m_settings.height = optimalH;
+            Settings::Get().Data().height = optimalH;
+            Settings::Get().Data().hasSavedSize = true;
+            Settings::Get().Save();
+            SetWindowPos(m_hWnd, NULL, 0, 0, m_settings.width, optimalH, SWP_NOMOVE | SWP_NOZORDER);
+            m_renderer.Resize(m_settings.width, optimalH);
+        }
     }
     m_renderer.Render(initialSnap, m_settings);
 
@@ -115,18 +119,24 @@ void Overlay::ApplyInitialPlacement() {
     auto& mm = MonitorManager::Get();
 
     int targetMon = m_settings.monitorIndex;
-    if (targetMon < 0) {
+    if (targetMon < 0 || targetMon >= (int)mm.GetMonitors().size()) {
         targetMon = mm.GetSecondaryIndex();
         m_settings.monitorIndex = targetMon;
     }
 
-    if (m_settings.posX < 0 || m_settings.posY < 0) {
+    if (m_settings.posX == -1 && m_settings.posY == -1) {
         POINT pt = mm.GetDefaultPosition(targetMon, m_settings.width, m_settings.height);
         m_settings.posX = pt.x;
         m_settings.posY = pt.y;
     } else {
         mm.ClampToMonitor(targetMon, m_settings.posX, m_settings.posY, m_settings.width, m_settings.height);
     }
+
+    // Keep Settings singleton in sync so TelemetryManager::Init() / Save() won't overwrite placement
+    Settings::Get().Data().monitorIndex = m_settings.monitorIndex;
+    Settings::Get().Data().posX = m_settings.posX;
+    Settings::Get().Data().posY = m_settings.posY;
+    Settings::Get().Save();
 }
 
 void Overlay::InitTrayIcon() {
@@ -402,6 +412,18 @@ LRESULT Overlay::HandleMessage(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
         m_settings.posX = x;
         m_settings.posY = y;
 
+        // Track whichever monitor the window was moved onto so restarts stay on that monitor
+        HMONITOR hCurMon = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+        auto& mm = MonitorManager::Get();
+        for (int i = 0; i < (int)mm.GetMonitors().size(); ++i) {
+            const MonitorInfo* mi = mm.GetMonitor(i);
+            if (mi && mi->hMon == hCurMon) {
+                m_settings.monitorIndex = i;
+                Settings::Get().Data().monitorIndex = i;
+                break;
+            }
+        }
+
         Settings::Get().Data().posX = x;
         Settings::Get().Data().posY = y;
         Settings::Get().Save();
@@ -595,7 +617,21 @@ LRESULT Overlay::HandleMessage(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
 
+    case WM_QUERYENDSESSION: {
+        Settings::Get().Save();
+        return TRUE;
+    }
+
+    case WM_ENDSESSION: {
+        if (wp) {
+            Settings::Get().Save();
+            Shutdown();
+        }
+        return 0;
+    }
+
     case WM_DESTROY: {
+        Settings::Get().Save();
         PostQuitMessage(0);
         return 0;
     }
